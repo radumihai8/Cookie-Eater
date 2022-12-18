@@ -1,7 +1,9 @@
 #include <LiquidCrystal.h>
 #include <EEPROM.h>
 #include "LedControl.h"
+#include "pitches.h"  // include a library with pitch values for musical notes
 
+const int BUZZER_PIN = 3;
 const byte dinPin = 12;
 const byte clockPin = 11;
 const byte loadPin = 10;
@@ -25,20 +27,20 @@ const byte rs = 9;
 const byte en = 8;
 const byte d4 = 7;
 const byte d5 = 6;
-const byte d6 = 5;
+const byte d6 = 13;
 const byte d7 = 4;
 
 LedControl lc = LedControl(dinPin, clockPin, loadPin, 1); //DIN, CLK, LOAD, No. DRIVER
 byte matrixBrightness = 2;
  
-const byte lcdContrastPin = 3;
+const byte lcdContrastPin = 5;
  
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 byte lcdContrast = 120;
 int currentMenuOption = 1;
 int currentMenuSubOption = 1;
 
-// 0 - greeting, 1 - menu, 2 - submenu, 3 - game, 4 - ending
+// 0 - greeting, 1 - menu, 2 - submenu, 3 - game, 4 - ending, 5 - enter name
 int currentState = 0;
 
 int startTime = 0;
@@ -60,32 +62,49 @@ int highScore = 7;
 int currentScore = 0;
 
 // X, Y position
-const int objectBlinkDelay = 500; // time in milliseconds to delay 
+const int foodBlinkDelay = 600; // time in milliseconds to delay 
 
 int currentPlayerPosition[2] = {0, 0};
 
 const int MAX_X = 8; // maximum x position
 const int MAX_Y = 8; // maximum y position
 
-//Game objects
-// Generate random object position and point value
+//Game foods
+// Generate random food position and point value
 const int levelNumber = 3;
+const int difficultyNumber = 3;
 const int pointsByLevel[levelNumber] = {1, 2, 5};
 const int timeByLevel[levelNumber] = {30, 20, 10};
+
+const int foodTimeByDifficulty[difficultyNumber] = {8000, 6500, 5000};
+long long foodSpawnTime = 0;
 int currentLevel = 1;
 
-bool objectState = 1;
-long long objectLastBlink = 0;
-int objectPos[2] = {0, 0}; // array to hold x and y positions
-int points = random(1, 10); // point value
+bool foodState = 1;
+long long foodLastBlink = 0;
+int foodPos[2] = {0, 0}; // array to hold x and y positions
 
 // Level stuff
 
 long long levelStartTime = 0;
+int currentLives = 3;
 
- 
+//Walls
+// Set min_x and max_x so wall isn't too high or too low
+int WALL_MIN_X = 2;
+int WALL_MAX_X = 5;
+
+int wallLengthByLevel[levelNumber] = {2,3,4};
+int wallPos[2] = {3,0};
+long long lastWallMovement = millis();
+int wallDirection = 0;
+
+bool playingCoinCollectSound = false;
+bool playingLevelUpSound = false;
+
 void setup() {
   Serial.begin(9600);
+  randomSeed(analogRead(4));
   pinMode(lcdContrastPin, OUTPUT);
   pinMode(pinSW, INPUT_PULLUP);
  
@@ -99,12 +118,20 @@ void setup() {
   lc.setIntensity(0, matrixBrightness); // sets brightness (0~15 possible values)
   lc.clearDisplay(0);// clear screen
 
-  objectPos[0] = random(0, MAX_X); // x position
-  objectPos[1] = random(0, MAX_Y); // y position
+  foodPos[0] = random(0, MAX_X); // x position
+  foodPos[1] = random(0, MAX_Y); // y position
+
+  highScore = EEPROM.read(highScoreAddress);
+  if(highScore == 255){
+    highScore = 0;
+    updateHighScore();
+  }
+
 }
  
 void loop() {
-
+  playCoinCollectSound();
+  playLevelUpSound();
 
   if(millis()-startTime > 2000 && currentState == 0 ){
     currentState = 1;
@@ -212,52 +239,74 @@ void loop() {
     lastSwState = swState;
   }
   else if(currentState == 3){
+    moveWall();
     printGameTime();
     long long currentMillis = millis();
-    if (currentMillis - objectLastBlink >= objectBlinkDelay) {
-      // Blink object
-      objectState = !objectState;
-      lc.setLed(0, objectPos[0], objectPos[1], objectState); // turns on LED at col, row
-      objectLastBlink = currentMillis; // update previous time
+
+    for(int i=0; i<=wallLengthByLevel[currentLevel - 1]; i++){
+      lc.setLed(0, wallPos[0], wallPos[1]+i, 1);
     }
 
-    if (currentPlayerPosition[0] == objectPos[0] && currentPlayerPosition[1] == objectPos[1]) {
-      // Player has collected object
+    if (currentMillis - foodLastBlink >= foodBlinkDelay) {
+      // Blink food
+      foodState = !foodState;
+      lc.setLed(0, foodPos[0], foodPos[1], foodState); // turns on LED at col, row
+      foodLastBlink = currentMillis; // update previous time
+    }
+
+
+    if(millis() - foodSpawnTime >= foodTimeByDifficulty[currentDifficulty - 1]){
+      //respawn food
+      lc.setLed(0, foodPos[0], foodPos[1], 0); // turns off current food position
+      Serial.println("Respawning food");
+      Serial.println(foodTimeByDifficulty[currentDifficulty]);
+      spawnFood();
+    }
+
+
+    if (currentPlayerPosition[0] == foodPos[0] && currentPlayerPosition[1] == foodPos[1]) {
+      // Player has collected food
       // Update score
+      playingCoinCollectSound = true;
       currentScore += pointsByLevel[currentLevel - 1];
-      // Generate new object
-      objectPos[0] = random(0, MAX_X); // x position
-      objectPos[1] = random(0, MAX_Y); // y position
+      // Generate new food
+      spawnFood();
       printGameStats();
     }
 
 
-    Serial.println(currentPlayerPosition[0]);
     //current player is not blinking
     lc.setLed(0, currentPlayerPosition[0], currentPlayerPosition[1], true); // turns on LED at col, row
     if(joyMovedDown()){
-      lc.setLed(0, currentPlayerPosition[0], currentPlayerPosition[1], false); // turns off old pos
-      currentPlayerPosition[0] += 1;
+      if(!checkCollision(currentPlayerPosition[0]+1, currentPlayerPosition[1])){
+        lc.setLed(0, currentPlayerPosition[0], currentPlayerPosition[1], false); // turns off old pos
+        currentPlayerPosition[0] += 1;
+      }
       joyMoved = true;
     }
     if(joyMovedUp()){
-      lc.setLed(0, currentPlayerPosition[0], currentPlayerPosition[1], false); // turns off old pos
-      currentPlayerPosition[0] -= 1;
+      if(!checkCollision(currentPlayerPosition[0] - 1, currentPlayerPosition[1])){
+        lc.setLed(0, currentPlayerPosition[0], currentPlayerPosition[1], false); // turns off old pos
+        currentPlayerPosition[0] -= 1;
+      }
       joyMoved = true;
     }
     if(joyMovedLeft()){
-      lc.setLed(0, currentPlayerPosition[0], currentPlayerPosition[1], false); // turns off old pos
-      currentPlayerPosition[1] -= 1;
+      if(!checkCollision(currentPlayerPosition[0], currentPlayerPosition[1] - 1)){
+        lc.setLed(0, currentPlayerPosition[0], currentPlayerPosition[1], false); // turns off old pos
+        currentPlayerPosition[1] -= 1;
+      }
       joyMoved = true;
     }
     if(joyMovedRight()){
-      lc.setLed(0, currentPlayerPosition[0], currentPlayerPosition[1], false); // turns off old pos
-      currentPlayerPosition[1] += 1;
+      if(!checkCollision(currentPlayerPosition[0], currentPlayerPosition[1] + 1)){
+        lc.setLed(0, currentPlayerPosition[0], currentPlayerPosition[1], false); // turns off old pos
+        currentPlayerPosition[1] += 1;
+      }
       joyMoved = true;
     }
     
     if (currentPlayerPosition[0] < 0) {
-      Serial.println("MAI MIC CA 0 pe X");
       currentPlayerPosition[0] = MAX_X - 1;
     } else if (currentPlayerPosition[0] >= MAX_X) {
       currentPlayerPosition[0] = 0;
@@ -275,6 +324,83 @@ void loop() {
   }
   
  
+}
+
+void moveWall(){
+  //0 - move to right, 1 to left
+  if(millis() - lastWallMovement > 3000){
+    lastWallMovement = millis();
+    if(wallPos[1] + 1 + wallLengthByLevel[currentLevel - 1] >= MAX_X && wallDirection == 0)
+      wallDirection = 1;
+    if(wallPos[1] - 1 < 0 && wallDirection == 1)
+      wallDirection = 0;
+
+    if(wallDirection == 1){
+      lc.setLed(0, wallPos[0], wallPos[1] + wallLengthByLevel[currentLevel - 1], 0);
+      wallPos[1]--;
+    }
+    else{
+      lc.setLed(0, wallPos[0], wallPos[1], 0);
+      wallPos[1]++;
+    }
+    if(checkCollision(currentPlayerPosition[0], currentPlayerPosition[1]))
+      die();
+    
+  }
+}
+
+
+void spawnFood(){
+  int randomX = random(0, MAX_X); // x position
+  int randomY = random(0, MAX_Y); // y position
+
+  while(checkCollision(randomX, randomY)){
+    randomX = random(0, MAX_X); // x position
+    randomY = random(0, MAX_Y); // y position
+  }
+
+  foodPos[0] = randomX;
+  foodPos[1] = randomY;
+
+  Serial.println("Spawned food at " + String(foodPos[0]) + " - " + String(foodPos[1]));
+
+  foodSpawnTime = millis();
+}
+
+void die(){
+  Serial.println("DIEEEEEEEEEEEE");
+  lc.setLed(0, currentPlayerPosition[0], currentPlayerPosition[1], 0);
+
+  currentLives --;
+  printGameStats();
+  playDeathSound();
+
+  if(currentLives == 0)
+  {
+    endGame();
+  }
+  else
+    respawn();
+}
+
+void respawn(){
+  currentPlayerPosition[0] = random(0, MAX_X);
+  currentPlayerPosition[1] = random(0, MAX_Y);
+}
+
+bool checkCollision(int x, int y){
+  if (x < 0) {
+    x = MAX_X - 1;
+  } else if (x >= MAX_X) {
+    x = 0;
+  }
+  if (y < 0) {
+    y = MAX_Y - 1;
+  } else if (y>= MAX_Y) {
+    y = 0;
+  }
+
+  return x == wallPos[0] && y >= wallPos[1] && y <= wallPos[1]+wallLengthByLevel[currentLevel - 1];
 }
 
 void increaseSetting(){
@@ -303,6 +429,7 @@ void increaseSetting(){
 void decreaseSetting(){
   switch(currentMenuSubOption){
       case 1:
+
         break;
       case 2:
         currentDifficulty -= 1;
@@ -374,20 +501,24 @@ void saveSettings(){
   //EEPROM.update(soundsAddress, currentSounds);
 }
 
+void updateHighScore(){
+    EEPROM.update(highScoreAddress, highScore);
+}
+
 void startGame(){
   levelStartTime = millis();
   currentState = 3;
   lcd.clear();
-  lcd.print("Pts: 0 ");
+  lcd.print("Pts: " + String(currentScore));
   lcd.setCursor(0, 1);
-  lcd.print("L: 3");
+  lcd.print("L: " + String(currentLives));
   lcd.setCursor(0, 0);
   currentScore = 0;
 }
 
 void printGameStats(){
   lcd.clear();
-  lcd.print("Pts: " + String(currentScore));
+  lcd.print("P: " + String(currentScore) + " L: " + String(currentLives));
   
 }
 
@@ -414,25 +545,38 @@ void printGameTime(){
 
 
 void levelUp(){
+  //Clear led matrix
+  for(int i = 0; i <= MAX_X; i++)
+    for(int j = 1; j<= MAX_Y; j++)
+      lc.setLed(0, i, j, 0);
+
+  playingLevelUpSound = true;
+
   currentLevel++;
   lcd.print("Level UP --- " + String(currentLevel));
   lcd.setCursor(0, 1);
-  lcd.print(String(pointsByLevel[currentLevel - 1]) + " pts / object");
+  lcd.print(String(pointsByLevel[currentLevel - 1]) + " pts / food");
   lcd.setCursor(0, 0);
   delay(5000);
   lcd.clear();
   printGameStats();
+
   levelStartTime = millis();
+  wallPos[0] = random(WALL_MIN_X,WALL_MAX_X);
 }
 
 void endGame(){
   currentState = 4;
+  currentLevel = 1;
+  currentLives = 3;
   lcd.clear();
   lcd.print("Your score: ");
   lcd.print(currentScore);
   delay(5000);
   lcd.clear();
   if(currentScore > highScore){
+    highScore = currentScore;
+    updateHighScore();
     lcd.print("You beat HS!!");
     lcd.setCursor(0, 1);
     lcd.print("Click to replay");
@@ -447,7 +591,7 @@ void endGame(){
 }
 
 void changeMenuOption(){
-  Serial.println("changing state");
+  tone(3, 800, 50);
   lcd.clear();
   switch (currentMenuOption) {
     case 1:
@@ -475,6 +619,7 @@ void changeMenuOption(){
 }
 
 void changeMenuSubOption(){
+  tone(3, 800, 50);
   Serial.println("changing state");
   lcd.clear();
   switch(currentMenuOption){
@@ -542,4 +687,69 @@ bool joyMovedRight(){
   if (yValue > maxThreshold && joyMoved == false)
     return true;
   return false;
+}
+
+
+int coinCollectSound[2][2] = {
+  // note, duration
+  {NOTE_B5, 100},
+  {NOTE_E6, 550},
+};
+
+int levelUpSound[6][2] = {
+  // note, duration
+  {NOTE_E6, 125},
+  {NOTE_G6, 125},
+  {NOTE_E7, 125},
+  {NOTE_C7, 125},
+  {NOTE_D7, 125},
+  {NOTE_G7, 125},
+};
+
+int currentSoundRow = 0;
+int currentSoundDelay = 0;
+unsigned long currentSoundTimer = 0;
+long long lastNotePlay = 0;
+
+void playCoinCollectSound(){
+  if(playingCoinCollectSound && currentSounds){
+    if(millis() - lastNotePlay >= currentSoundDelay){
+      tone(3, coinCollectSound[currentSoundRow][0],coinCollectSound[currentSoundRow][1]);
+      currentSoundDelay = coinCollectSound[currentSoundRow][1];
+      currentSoundRow ++;
+      lastNotePlay = millis();
+    }
+
+    if(currentSoundRow > 1){
+      currentSoundRow = 0;
+      currentSoundDelay = 0;
+      lastNotePlay = 0;
+      playingCoinCollectSound = false;
+      Serial.println("SOUND ENDED");
+    }
+  }
+}
+
+void playLevelUpSound(){
+  if(playingLevelUpSound && currentSounds){
+    if(millis() - lastNotePlay >= currentSoundDelay){
+      tone(3, levelUpSound[currentSoundRow][0],levelUpSound[currentSoundRow][1]);
+      currentSoundDelay = levelUpSound[currentSoundRow][1];
+      currentSoundRow ++;
+      lastNotePlay = millis();
+    }
+
+    if(currentSoundRow > 5){
+      currentSoundRow = 0;
+      currentSoundDelay = 0;
+      lastNotePlay = 0;
+      playingLevelUpSound = false;
+      Serial.println("SOUND ENDED");
+    }
+  }
+}
+
+void playDeathSound(){
+  if(currentSounds)
+    tone(3, 100, 300);
 }
