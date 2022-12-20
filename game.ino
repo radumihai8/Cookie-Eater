@@ -3,15 +3,84 @@
 #include "LedControl.h"
 #include "pitches.h"  // include a library with pitch values for musical notes
 
+byte heartChar[8] = {
+  0b00000,
+  0b01010,
+  0b11111,
+  0b11111,
+  0b01110,
+  0b00100,
+  0b00000,
+  0b00000
+};
+
+byte arrowUpChar[8] = {
+  0b00100,
+  0b01110,
+  0b11111,
+  0b00100,
+  0b00100,
+  0b00100,
+  0b00100,
+  0b00100
+};
+
+byte arrowDownChar[8] = {
+  0b00100,
+  0b00100,
+  0b00100,
+  0b00100,
+  0b00100,
+  0b11111,
+  0b01110,
+  0b00100
+};
+
+byte verticalArrowsChar[8] = {
+	0b00100,
+	0b01110,
+	0b11111,
+	0b00000,
+	0b00000,
+	0b11111,
+	0b01110,
+	0b00100
+};
+
+const uint64_t menuImages[] = {
+  //start game
+  0x061e7efe7e1e0600,
+  //highscore
+  0x7e1818181c181800,
+  //settings
+  0x0347ee7c381c0e04,
+  //about
+  0x180018183c3c1800,
+  //howtoplay
+  0x1800183860663c00
+  
+};
+
+
+char *aboutText[] = { "GH: radumihai8dasdasdasdasdasdasdasd", "Radu Mihai",  "Eat Cookies"};
+char aboutTextIndex = 0;
+
+char *howToPlayText[] = { "3 levels", "1-3 lives", "Time decreases", "Points increase", "Eat cookies", "Wall can kill",  "Watch the time"};
+char howToPlayTextIndex = 0;
+
 const int BUZZER_PIN = 3;
 const byte dinPin = 12;
-const byte clockPin = 11;
+const byte clockPin = A4;
 const byte loadPin = 10;
 const byte matrixSize = 8;
  
 const int pinSW = 2; // digital pin connected to switch output
 const int pinX = A0; // A0 - analog pin connected to X output
 const int pinY = A1; // A1 - analog pin connected to Y output
+
+const int lcdBrightnessPin = 11;
+const int minLcdBrightness = 40;
+const int maxLcdBrightness = 100;
 
 int xValue = 0;
 int yValue = 0;
@@ -46,18 +115,20 @@ int currentState = 0;
 int startTime = 0;
 
 int currentDifficulty = 1;
-int currentBrightness = 100;
+int currentMatrixBrightness = 10;
+int currentLcdBrightness = 100;
 bool currentSounds = 1;
 
 int contrastAddress = 0;
 int difficultyAddress = 1;
-int brightnessAddress = 2;
+int matrixBrightnessAddress = 2;
 int soundsAddress = 3;
-int nameAddress = 4;
-int highScoreAddress = 5;
+//int nameAddress = 4;
+int lcdBrightnessAddress = 5;
+
 
 // TODO: retrieve from eeprom
-int highScore = 7;
+int highScore = 1;
 
 int currentScore = 0;
 
@@ -87,6 +158,8 @@ int foodPos[2] = {0, 0}; // array to hold x and y positions
 // Level stuff
 
 long long levelStartTime = 0;
+
+int livesByDifficulty[difficultyNumber] = {3, 2, 1};
 int currentLives = 3;
 
 //Walls
@@ -102,18 +175,45 @@ int wallDirection = 0;
 bool playingCoinCollectSound = false;
 bool playingLevelUpSound = false;
 
+bool newHighscore = false;
+
+// Name 
+
+int currentLetterPosition = 0;
+const int MAX_NAME_LENGTH = 6;
+char playerName[MAX_NAME_LENGTH+1] = "      ";
+int firstNameAddress[2] = {6, 6+MAX_NAME_LENGTH};
+int firstScoreAddress = 6 + MAX_NAME_LENGTH + 1;
+int secondNameAddress[2] = {6, 6+ 2 * MAX_NAME_LENGTH};
+int secondScoreAddress = 6 + 2 * MAX_NAME_LENGTH + 1;
+int thirdNameAddress[2] = {6, 6+ 3 * MAX_NAME_LENGTH};
+int thirdScoreAddress = 6 + 3 * MAX_NAME_LENGTH + 1;
+int fourthNameAddress[2] = {6, 6+ 4 * MAX_NAME_LENGTH};
+int fourthScoreAddress = 6 + 4 * MAX_NAME_LENGTH + 1;
+int fifthNameAddress[2] = {6, 6+ 5 * MAX_NAME_LENGTH};
+int fifthScoreAddress = 6 + 5 * MAX_NAME_LENGTH + 1;
+
+long long lastScrollTextTime = 0;
+const int scrollTextTime = 500;
+
 void setup() {
+
   Serial.begin(9600);
   randomSeed(analogRead(4));
   pinMode(lcdContrastPin, OUTPUT);
+  pinMode(lcdBrightnessPin, OUTPUT); 
   pinMode(pinSW, INPUT_PULLUP);
  
   lcd.begin(16, 2);
+  lcd.createChar(0, heartChar); // create a new custom character (index 0)
+  lcd.createChar(1, arrowUpChar); // create a new custom character (index 1)
+  lcd.createChar(2, arrowDownChar); // create a new custom character (index 2)
+  lcd.createChar(3, verticalArrowsChar); // create a new custom character (index 3)
   lcd.print("Hello!");
-  //loadSettings();
+  loadSettings();
   analogWrite(lcdContrastPin, lcdContrast);
   startTime = millis();
-
+  //setLcdBrightness(currentLcdBrightness);
   lc.shutdown(0, false); // turn off power saving, enables display
   lc.setIntensity(0, matrixBrightness); // sets brightness (0~15 possible values)
   lc.clearDisplay(0);// clear screen
@@ -121,15 +221,29 @@ void setup() {
   foodPos[0] = random(0, MAX_X); // x position
   foodPos[1] = random(0, MAX_Y); // y position
 
-  highScore = EEPROM.read(highScoreAddress);
+  highScore = EEPROM.read(firstScoreAddress);
   if(highScore == 255){
     highScore = 0;
-    updateHighScore();
+    //updateHighScore();
   }
+
+  setLcdBrightness();
+
+  highScore = 1;
 
 }
  
 void loop() {
+  // if(currentMenuOption == 4){
+  //   if(millis() - lastScrollTextTime >= scrollTextTime){
+  //     lcd.scrollDisplayLeft();
+  //     lastScrollTextTime = millis();
+  //   }
+  // }
+  setLcdBrightness();
+
+
+
   playCoinCollectSound();
   playLevelUpSound();
 
@@ -153,6 +267,47 @@ void loop() {
     if(joyMovedUp()){
       currentMenuOption -= 1;
       joyMoved = true;
+    }
+
+    if(joyMovedLeft()){
+      switch(currentMenuOption){
+        case 4:
+          aboutTextIndex -= 1;
+          if(aboutTextIndex < 0)
+            aboutTextIndex = 0;
+          break;
+        case 5:
+          howToPlayTextIndex -= 1;
+          if(howToPlayTextIndex<0)
+            howToPlayTextIndex = 0;
+          break;
+        default:
+          Serial.println("asd");
+
+      }
+      
+      joyMoved = true;
+      changeMenuOption();
+    }
+    if(joyMovedRight()){
+      switch(currentMenuOption){
+        case 4:
+          aboutTextIndex += 1;
+          if(aboutTextIndex > 2)
+            aboutTextIndex = 0;
+          break;
+        case 5:
+          howToPlayTextIndex += 1;
+          if(howToPlayTextIndex > 5)
+            howToPlayTextIndex = 0;
+          break;
+        default:
+          Serial.println("asd" + String(currentMenuOption));
+
+      }
+      
+      joyMoved = true;
+      changeMenuOption();
     }
 
     if(currentMenuOption > 5){
@@ -230,10 +385,16 @@ void loop() {
     swState = digitalRead(pinSW);
     if (swState != lastSwState) {
       if (swState == LOW) {
-        Serial.println("Resetting");
-        currentState = 1;
-        currentMenuOption = 1;
-        changeMenuOption();
+        if(newHighscore){
+          Serial.println("aici");
+          newHighscore = false;
+          currentState = 5;
+          showNameMenu();
+        }
+        else{
+          resetToMenu();
+        }
+
       }
     }
     lastSwState = swState;
@@ -259,7 +420,6 @@ void loop() {
       //respawn food
       lc.setLed(0, foodPos[0], foodPos[1], 0); // turns off current food position
       Serial.println("Respawning food");
-      Serial.println(foodTimeByDifficulty[currentDifficulty]);
       spawnFood();
     }
 
@@ -322,8 +482,78 @@ void loop() {
     }
   
   }
-  
- 
+  else if(currentState == 5){
+    if(joyMovedRight()){
+      currentLetterPosition++;
+      joyMoved = true;
+    }
+    if(joyMovedLeft()){
+      currentLetterPosition--;
+      joyMoved = true;
+    }
+
+
+    if(joyMovedUp()){
+      playerName[currentLetterPosition]++;
+      joyMoved = true;
+    }
+    if(joyMovedDown()){
+      playerName[currentLetterPosition]--;
+      joyMoved = true;
+    }
+
+    if(playerName[currentLetterPosition] <= ' '){
+      playerName[currentLetterPosition] = ' ';
+    }
+
+    if(playerName[currentLetterPosition] == 'A' - 1){
+      playerName[currentLetterPosition] = ' ';
+    }
+
+    if(playerName[currentLetterPosition] == ' ' + 1){
+      playerName[currentLetterPosition] = 'A';
+    }
+
+    if(playerName[currentLetterPosition] > 'Z')
+      playerName[currentLetterPosition] = 'Z';
+
+
+    if(currentLetterPosition < 0)
+      currentLetterPosition = 0;
+    if(currentLetterPosition >= MAX_NAME_LENGTH)
+      currentLetterPosition = MAX_NAME_LENGTH - 1;
+
+    if(joyMoved)
+      showNameMenu();
+
+    if (joyIsNeutral()) {
+      joyMoved = false;
+    }
+
+    swState = digitalRead(pinSW);
+    if (swState != lastSwState) {
+      if (swState == LOW) {
+        updateHighScore();
+        resetToMenu();
+      }
+    }
+
+    lastSwState = swState;
+  }
+
+  if(currentState != 5)
+    lcd.noCursor();
+}
+
+void setLcdBrightness(){
+  analogWrite(lcdBrightnessPin, currentLcdBrightness);
+}
+
+void resetToMenu(){
+  Serial.println("Resetting");
+  currentState = 1;
+  currentMenuOption = 1;
+  changeMenuOption();
 }
 
 void moveWall(){
@@ -349,6 +579,21 @@ void moveWall(){
   }
 }
 
+void showNameMenu(){
+  lcd.clear();
+  lcd.print("Click to save");
+  lcd.setCursor(0,1);
+  for(int i = 0; i<MAX_NAME_LENGTH; i++)
+    lcd.print(playerName[i]);
+
+  lcd.print("<>");
+  lcd.setCursor(MAX_NAME_LENGTH+3,1);
+  lcd.write((byte)1);
+  lcd.setCursor(MAX_NAME_LENGTH+4,1);
+  lcd.write((byte)2);
+  lcd.setCursor(currentLetterPosition, 1);
+  lcd.cursor();
+}
 
 void spawnFood(){
   int randomX = random(0, MAX_X); // x position
@@ -404,18 +649,33 @@ bool checkCollision(int x, int y){
 }
 
 void increaseSetting(){
+  if(currentSounds)
+    tone(3, 600, 20);
   switch(currentMenuSubOption){
       case 1:
+        currentDifficulty += 1;
+        if(currentDifficulty > 3)
+          currentDifficulty = 3;
         break;
       case 2:
-        currentDifficulty += 1;
-        break;
-      case 3:
         lcdContrast += 10;
+        if(lcdContrast > 170)
+          lcdContrast = 170;
         analogWrite(lcdContrastPin, lcdContrast);
         break;
+      case 3:
+        currentMatrixBrightness += 1;
+        if(currentMatrixBrightness > 15){
+          currentMatrixBrightness = 15;
+        }
+        lc.setIntensity(0, currentMatrixBrightness);
+        break;
       case 4:
-        currentBrightness += 10;
+        currentLcdBrightness += 10;
+        if(currentLcdBrightness > 100){
+          currentLcdBrightness = 100;
+        }
+        setLcdBrightness();
         break;
       case 5:
         currentSounds = !currentSounds;
@@ -427,19 +687,33 @@ void increaseSetting(){
 }
 
 void decreaseSetting(){
+  if(currentSounds)
+    tone(3, 200, 20);
   switch(currentMenuSubOption){
       case 1:
-
+        currentDifficulty -= 1;
+        if(currentDifficulty < 1)
+          currentDifficulty = 1;
         break;
       case 2:
-        currentDifficulty -= 1;
-        break;
-      case 3:
         lcdContrast -= 10;
+        if(lcdContrast < 80)
+          lcdContrast = 80;
         analogWrite(lcdContrastPin, lcdContrast);
         break;
+      case 3:
+        currentMatrixBrightness -= 1;
+        if(currentMatrixBrightness < 0){
+          currentMatrixBrightness  = 0;
+        }
+        lc.setIntensity(0, currentMatrixBrightness);
+        break;
       case 4:
-        currentBrightness -= 10;
+        currentLcdBrightness -= 10;
+        if(currentLcdBrightness < 0){
+          currentLcdBrightness = 0;
+        }
+        setLcdBrightness();
         break;
       case 5:
         currentSounds = !currentSounds;
@@ -474,8 +748,6 @@ void changeMenuState(){
         break;
       case 4:
         break;
-      case 5:
-        break;
       case 6:
         saveSettings();
         currentState = 1;
@@ -489,37 +761,47 @@ void changeMenuState(){
 void loadSettings(){
   lcdContrast = EEPROM.read(contrastAddress);
   //currentDifficulty = EEPROM.read(difficultyAddress);
-  //currentBrightness = EEPROM.read(brightnessAddress);
-  //currentSounds = EEPROM.read(soundsAddress);
+  //currentMatrixBrightness = EEPROM.read(matrixBrightnessAddress);
+  currentLcdBrightness = EEPROM.read(lcdBrightnessAddress);
+  currentSounds = EEPROM.read(soundsAddress);
 }
 
 void saveSettings(){
   Serial.println("Settings saved");
   EEPROM.update(contrastAddress, lcdContrast);
   //EEPROM.update(difficultyAddress, currentDifficulty);
-  //EEPROM.update(brightnessAddress, currentBrightness);
-  //EEPROM.update(soundsAddress, currentSounds);
+  //EEPROM.update(matrixBrightnessAddress, currentMatrixBrightness);
+  EEPROM.update(lcdBrightnessAddress, currentLcdBrightness);
+  EEPROM.update(soundsAddress, currentSounds);
 }
 
 void updateHighScore(){
-    EEPROM.update(highScoreAddress, highScore);
+  updatePlayer(playerName, highScore, firstNameAddress, firstScoreAddress);
+}
+
+void updatePlayer(char* playerName, int score, int nameAddress[2], int scoreAddress) {
+  for(int i = 0; i <= MAX_NAME_LENGTH; i++){
+    EEPROM.update(nameAddress[0] + i, playerName[i]);
+  }
+
+  EEPROM.update(scoreAddress, highScore);
 }
 
 void startGame(){
+  lc.clearDisplay(0);
+  currentLives = livesByDifficulty[currentDifficulty - 1];
   levelStartTime = millis();
   currentState = 3;
-  lcd.clear();
-  lcd.print("Pts: " + String(currentScore));
-  lcd.setCursor(0, 1);
-  lcd.print("L: " + String(currentLives));
-  lcd.setCursor(0, 0);
-  currentScore = 0;
+  printGameStats();
+  currentScore = 5;
 }
 
 void printGameStats(){
   lcd.clear();
-  lcd.print("P: " + String(currentScore) + " L: " + String(currentLives));
-  
+  lcd.print("P: " + String(currentScore));
+  lcd.setCursor(6, 0);
+  lcd.write((byte)0);
+  lcd.print(": " + String(currentLives));
 }
 
 void printGameTime(){
@@ -547,12 +829,13 @@ void printGameTime(){
 void levelUp(){
   //Clear led matrix
   for(int i = 0; i <= MAX_X; i++)
-    for(int j = 1; j<= MAX_Y; j++)
+    for(int j = 0; j<= MAX_Y; j++)
       lc.setLed(0, i, j, 0);
 
   playingLevelUpSound = true;
 
   currentLevel++;
+  lcd.clear();
   lcd.print("Level UP --- " + String(currentLevel));
   lcd.setCursor(0, 1);
   lcd.print(String(pointsByLevel[currentLevel - 1]) + " pts / food");
@@ -576,10 +859,11 @@ void endGame(){
   lcd.clear();
   if(currentScore > highScore){
     highScore = currentScore;
-    updateHighScore();
+    newHighscore = true;
+    //updateHighScore();
     lcd.print("You beat HS!!");
     lcd.setCursor(0, 1);
-    lcd.print("Click to replay");
+    lcd.print("Click to save the score");
     lcd.setCursor(0, 0);
   }
   else{
@@ -591,8 +875,12 @@ void endGame(){
 }
 
 void changeMenuOption(){
-  tone(3, 800, 50);
+  //Serial.println(currentSounds);
+  if(currentSounds)
+    tone(3, 800, 50);
   lcd.clear();
+  lcd.write((byte)3);
+  displayImage(menuImages[currentMenuOption-1]);
   switch (currentMenuOption) {
     case 1:
       Serial.println("changing state1111");
@@ -601,16 +889,31 @@ void changeMenuOption(){
     case 2:
       lcd.print("Highscore: ");
       lcd.setCursor(0,1);
-      lcd.print(highScore);
+      if(highScore != 0){
+        // for(int i = 0; i<MAX_NAME_LENGTH; i++)
+        //   lcd.print(playerName[i]);
+        for(int i = firstNameAddress[0]; i<=firstNameAddress[1]; i++){
+          lcd.print((char)EEPROM.read(i));
+        }
+        lcd.print(" : " + String(highScore));
+      }
+      else{
+        lcd.print("No highscore yet!");
+      }
       break;
     case 3:
       lcd.print("Settings");
       break;
     case 4:
-      lcd.print("About");
+      lcd.print("About <>");
+      lcd.setCursor(0,1);
+      lcd.print(aboutText[aboutTextIndex]);
+      lcd.scrollDisplayLeft();
       break;
     case 5:
-      lcd.print("How to play");
+      lcd.print("How to play <>");
+      lcd.setCursor(0,1);
+      lcd.print(howToPlayText[howToPlayTextIndex]);
       break;
     default:
       lcd.print("Default");
@@ -619,45 +922,70 @@ void changeMenuOption(){
 }
 
 void changeMenuSubOption(){
-  tone(3, 800, 50);
+  if(currentSounds)
+    tone(3, 800, 50);
   Serial.println("changing state");
   lcd.clear();
+  lcd.write((byte)3);
+
   switch(currentMenuOption){
     case 3:
       switch (currentMenuSubOption) {
         case 1:
-          Serial.println("change menu suboption 1");
-          lcd.print("Enter Name");
-          break;
-        case 2:
           Serial.println("change menu suboption 2");
           lcd.print("Difficulty ");
           lcd.print(currentDifficulty);
+          lcd.print("<>");
           break;
-        case 3:
+        case 2:
+          lightDownMatrix();
           Serial.println("change menu suboption 3");
           lcd.print("Contrast ");
           lcd.print(lcdContrast);
+          lcd.print("<>");
+          break;
+        case 3:
+          lightUpMatrix();
+          Serial.println("change menu suboption 3");
+          lcd.print("Mat BRT ");
+          lcd.print(currentMatrixBrightness);
+          lcd.print("<>");
           break;
         case 4:
+          lightUpMatrix();
           Serial.println("change menu suboption 4");
-          lcd.print("Brightness ");
-          lcd.print(currentBrightness);
+          lcd.print("LCD BRT ");
+          lcd.print(currentLcdBrightness);
+          lcd.print("<>");
           break;
         case 5:
+          lightDownMatrix();
           Serial.println("change menu suboption 5");
           lcd.print("Sounds ");
           lcd.print(currentSounds);
+          lcd.print("<>");
           break;
         case 6:
           Serial.println("change menu suboption 6");
-          lcd.print("Back to main menu");
+          lcd.print("Back to menu");
           break;  
         default:
           lcd.print("Default");
           break;
       }
   }
+}
+
+void lightUpMatrix(){
+    for(int i = 0; i <= MAX_X; i++)
+      for(int j = 0; j<= MAX_Y; j++)
+        lc.setLed(0, i, j, 1);
+}
+
+void lightDownMatrix(){
+  for(int i = 0; i <= MAX_X; i++)
+    for(int j = 0; j<= MAX_Y; j++)
+      lc.setLed(0, i, j, 0);
 }
 
 
@@ -752,4 +1080,13 @@ void playLevelUpSound(){
 void playDeathSound(){
   if(currentSounds)
     tone(3, 100, 300);
+}
+
+void displayImage(uint64_t image) {
+  for (int i = 0; i < 8; i++) {
+    byte row = (image >> i * 8) & 0xFF;
+    for (int j = 0; j < 8; j++) {
+      lc.setLed(0, i, j, bitRead(row, j));
+    }
+  }
 }
