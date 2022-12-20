@@ -1,5 +1,15 @@
 # Cookie Eater - 8x8 Matrix Game
 
+## Backstory:
+
+This project was developed as part of the Introduction to Robotics course.
+
+The game is inspired by classic arcade games like Pac-Man and Space Invaders, and I wanted to create a simple but challenging game that could be enjoyed by players of all skill levels. 
+
+It was a fun and challenging process, and I learned a lot along the way.
+
+I hope you have fun playing Cookie Eater!
+
 ## Description:
 
 Cookie Eater is a winter-themed game set in a snowy 8x8 matrix. In this game, you play as a pixelated character with the goal of eating as many cookies as possible before the time runs out.
