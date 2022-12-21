@@ -330,12 +330,12 @@ void loop() {
 
     if (joyMovedLeft()) {
       switch (currentMenuOption) {
-        case 4:
+        case aboutOptionIndex:
           aboutTextIndex -= 1;
           if (aboutTextIndex < 0)
             aboutTextIndex = 0;
           break;
-        case 5:
+        case howToPlayOptionIndex:
           howToPlayTextIndex -= 1;
           if (howToPlayTextIndex < 0)
             howToPlayTextIndex = 0;
@@ -346,23 +346,22 @@ void loop() {
       changeMenuOption();
     }
     if (joyMovedRight()) {
-      switch (currentMenuOption) {
-        case aboutOptionIndex:
-          aboutTextIndex += 1;
-          byte aboutTextSize = (sizeof(aboutText) / sizeof(aboutText[0])) - 1;
-          if (aboutTextIndex > aboutTextSize)
-            aboutTextIndex = 0;
-          break;
-        case howToPlayOptionIndex:
-          howToPlayTextIndex += 1;
-          byte howToPlayTextSize = (sizeof(howToPlayText) / sizeof(howToPlayText[0])) - 1;
-          if (howToPlayTextIndex >  howToPlayTextSize)
-            howToPlayTextIndex = 0;
-          break;
-        default:
-          break;
-      }
+      Serial.println("Joy moved right" + String(currentMenuOption));
 
+      if(currentMenuOption == 5){
+        howToPlayTextIndex += 1;
+        byte howToPlayTextSize = (sizeof(howToPlayText) / sizeof(howToPlayText[0])) - 1;
+        Serial.println(howToPlayTextSize);
+        if (howToPlayTextIndex >  howToPlayTextSize)
+          howToPlayTextIndex = 0;
+      }
+      else if(currentMenuOption == 4){
+        aboutTextIndex += 1;
+        byte aboutTextSize = (sizeof(aboutText) / sizeof(aboutText[0])) - 1;
+        if (aboutTextIndex > aboutTextSize)
+          aboutTextIndex = 0;
+      }
+      
       joyMoved = true;
       changeMenuOption();
     }
