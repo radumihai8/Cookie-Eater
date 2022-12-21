@@ -288,10 +288,12 @@ void setup() {
   lcd.createChar(1, arrowUpChar);         // create a new custom character (index 1)
   lcd.createChar(2, arrowDownChar);       // create a new custom character (index 2)
   lcd.createChar(3, verticalArrowsChar);  // create a new custom character (index 3)
-  lcd.print("Hello!");
   loadSettings();
 
   analogWrite(lcdContrastPin, currentLcdContrast);
+  
+  lcd.clear();
+  lcd.print("Hello!");
 
   lc.shutdown(0, false);                 // turn off power saving, enables display
   lc.setIntensity(0, matrixBrightness);  // sets brightness (0~15 possible values)
