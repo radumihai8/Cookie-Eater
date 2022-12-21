@@ -3,6 +3,8 @@
 #include "LedControl.h"
 #include "pitches.h"  // include a library with pitch values for musical notes
 
+void changeMenuSubOption(bool withoutSounds = false);
+
 int coinCollectSound[2][2] = {
   // note, duration
   { NOTE_B5, 100 },
@@ -68,6 +70,11 @@ byte verticalArrowsChar[8] = {
   0b00100
 };
 
+const byte verticalArrowsCharIndex = 3;
+const byte arrowDownCharIndex = 2;
+const byte arrowUpCharIndex = 1;
+const byte heartCharIndex = 0;
+
 const uint64_t menuImages[] = {
   //start game
   0x061e7efe7e1e0600,
@@ -89,7 +96,7 @@ char aboutTextIndex = 0;
 char *howToPlayText[] = { "3 levels", "1-3 lives", "Time decreases", "Points increase", "Eat cookies", "Wall can kill", "Watch the time" };
 char howToPlayTextIndex = 0;
 
-const int BUZZER_PIN = 3;
+const byte BUZZER_PIN = 3;
 const byte dinPin = 12;
 const byte clockPin = A4;
 const byte loadPin = A3;
@@ -101,11 +108,11 @@ const byte pinY = A1;  // A1 - analog pin connected to Y output
 
 const byte lcdBrightnessPin = 10;
 
-const int minLcdBrightness = 10;
-const int maxLcdBrightness = 100;
+const byte minLcdBrightness = 10;
+const byte maxLcdBrightness = 100;
 
-const int minLcdContrast = 70;
-const int maxLcdContrast = 170;
+const byte minLcdContrast = 70;
+const byte maxLcdContrast = 170;
 
 const byte minMatrixBrightness = 1;
 const byte maxMatrixBrightness = 15;
@@ -241,6 +248,32 @@ const byte minMenuOption = 1;
 const byte maxSubMenuOptions = 6;
 const byte minSubMenuOptions = 1;
 
+const byte startGameOptionIndex = 1;
+const byte highScoreOptionIndex = 2;
+const byte settingsOptionIndex = 3;
+const byte aboutOptionIndex = 4;
+const byte howToPlayOptionIndex = 5;
+
+const  byte difficultySettingIndex = 1;
+const  byte lcdContrastSettingIndex = 2;
+const  byte matrixBrightnessSettingIndex = 3;
+const  byte lcdBrightnessSettingIndexIndex = 4;
+const  byte soundsSettingIndex = 5;
+const  byte backToMenuIndex = 6;
+
+//sounds
+const int increaseSettingBuzzFreq = 2000;
+const int increaseSettingBuzzTime = 20;
+
+const int decreaseSettingBuzzFreq = 200;
+const int decreaseSettingBuzzTime = 20;
+
+const int moveMenuBuzzFreq = 800;
+const int moveMenuBuzzTime = 50;
+
+const int deathBuzzFreq = 100;
+const int deathBuzzTime = 300;
+
 void setup() {
 
   Serial.begin(9600);
@@ -307,8 +340,6 @@ void loop() {
           if (howToPlayTextIndex < 0)
             howToPlayTextIndex = 0;
           break;
-        default:
-          Serial.println("asd");
       }
 
       joyMoved = true;
@@ -316,18 +347,20 @@ void loop() {
     }
     if (joyMovedRight()) {
       switch (currentMenuOption) {
-        case 4:
+        case aboutOptionIndex:
           aboutTextIndex += 1;
-          if (aboutTextIndex > 2)
+          byte aboutTextSize = (sizeof(aboutText) / sizeof(aboutText[0])) - 1;
+          if (aboutTextIndex > aboutTextSize)
             aboutTextIndex = 0;
           break;
-        case 5:
+        case howToPlayOptionIndex:
           howToPlayTextIndex += 1;
-          if (howToPlayTextIndex > 5)
+          byte howToPlayTextSize = (sizeof(howToPlayText) / sizeof(howToPlayText[0])) - 1;
+          if (howToPlayTextIndex >  howToPlayTextSize)
             howToPlayTextIndex = 0;
           break;
         default:
-          Serial.println("asd" + String(currentMenuOption));
+          break;
       }
 
       joyMoved = true;
@@ -358,7 +391,7 @@ void loop() {
 
     lastSwState = swState;
   } else if (currentState == subMenuState) {
-    int oldMenuSubState = currentMenuSubOption;
+    byte oldMenuSubState = currentMenuSubOption;
 
     if (joyMovedDown()) {
       currentMenuSubOption += 1;
@@ -407,7 +440,6 @@ void loop() {
     if (swState != lastSwState) {
       if (swState == LOW) {
         if (newHighscore) {
-          Serial.println("aici");
           newHighscore = false;
           currentState = enterNameState;
           showNameMenu();
@@ -444,7 +476,7 @@ void loop() {
 
     if (currentPlayerPosition[0] == foodPos[0] && currentPlayerPosition[1] == foodPos[1]) {
       // Player has collected food
-      // Update score
+      // Set playing sound to true
       playingCoinCollectSound = true;
       currentScore += pointsByLevel[currentLevel - 1];
       // Generate new food
@@ -558,7 +590,7 @@ void loop() {
     lastSwState = swState;
   }
 
-  if (currentState != 5)
+  if (currentState != enterNameState)
     lcd.noCursor();
 }
 
@@ -569,7 +601,7 @@ void setLcdBrightness() {
 void resetToMenu() {
   Serial.println("Resetting");
   currentState = menuState;
-  currentMenuOption = 1;
+  currentMenuOption = startGameOptionIndex;
   changeMenuOption();
 }
 
@@ -595,17 +627,19 @@ void moveWall() {
 }
 
 void showNameMenu() {
+  byte currentCursorPosition = 0;
   lcd.clear();
   lcd.print("Click to save");
   lcd.setCursor(0, 1);
   for (int i = 0; i < MAX_NAME_LENGTH; i++)
     lcd.print(playerName[i]);
 
+  currentCursorPosition += MAX_NAME_LENGTH;
+
   lcd.print("<>");
-  lcd.setCursor(MAX_NAME_LENGTH + 3, 1);
-  lcd.write((byte)1);
-  lcd.setCursor(MAX_NAME_LENGTH + 4, 1);
-  lcd.write((byte)2);
+  currentCursorPosition += 3;
+  lcd.setCursor(currentCursorPosition, 1);
+  lcd.write((byte)verticalArrowsCharIndex);
   lcd.setCursor(currentLetterPosition, 1);
   lcd.cursor();
 }
@@ -628,7 +662,6 @@ void spawnFood() {
 }
 
 void die() {
-  Serial.println("DIEEEEEEEEEEEE");
   lc.setLed(0, currentPlayerPosition[0], currentPlayerPosition[1], 0);
 
   currentLives--;
@@ -663,75 +696,77 @@ bool checkCollision(int x, int y) {
 
 void increaseSetting() {
   if (currentSounds)
-    tone(BUZZER_PIN, 600, 20);
+    tone(BUZZER_PIN, increaseSettingBuzzFreq, increaseSettingBuzzTime);
+
   switch (currentMenuSubOption) {
-    case 1:
-      currentDifficulty += 1;
+    case difficultySettingIndex:
+      currentDifficulty += difficultyStep;
       if (currentDifficulty > maxDifficulty)
         currentDifficulty = maxDifficulty;
       break;
-    case 2:
+    case lcdContrastSettingIndex:
       currentLcdContrast += lcdContrastStep;
       if (currentLcdContrast > maxLcdContrast)
         currentLcdContrast = maxLcdContrast;
       analogWrite(lcdContrastPin, currentLcdContrast);
       break;
-    case 3:
+    case matrixBrightnessSettingIndex:
       currentMatrixBrightness += matrixBrightnessStep;
       if (currentMatrixBrightness > maxMatrixBrightness) {
         currentMatrixBrightness = maxMatrixBrightness;
       }
       lc.setIntensity(0, currentMatrixBrightness);
       break;
-    case 4:
+    case lcdBrightnessSettingIndexIndex:
       currentLcdBrightness += lcdBrightnessStep;
       if (currentLcdBrightness > maxLcdBrightness) {
         currentLcdBrightness = maxLcdBrightness;
       }
       setLcdBrightness();
       break;
-    case 5:
+    case soundsSettingIndex:
       currentSounds = !currentSounds;
       break;
-    case 6:
+    default:
       break;
   }
-  changeMenuSubOption();
+  changeMenuSubOption(true);
 }
 
 void decreaseSetting() {
   if (currentSounds)
-    tone(BUZZER_PIN, 200, 20);
+    tone(BUZZER_PIN, decreaseSettingBuzzFreq, decreaseSettingBuzzTime);
+
   switch (currentMenuSubOption) {
-    case 1:
-      currentDifficulty -= minDifficulty;
+    case difficultySettingIndex:
+      currentDifficulty -= difficultyStep;
       if (currentDifficulty < minDifficulty)
         currentDifficulty = minDifficulty;
       break;
-    case 2:
+    case lcdContrastSettingIndex:
       currentLcdContrast -= lcdContrastStep;
       if (currentLcdContrast < minLcdContrast)
         currentLcdContrast = minLcdContrast;
       analogWrite(lcdContrastPin, currentLcdContrast);
       break;
-    case 3:
+    case matrixBrightnessSettingIndex:
       currentMatrixBrightness -= matrixBrightnessStep;
       if (currentMatrixBrightness < minMatrixBrightness) {
         currentMatrixBrightness = minMatrixBrightness;
       }
       lc.setIntensity(0, currentMatrixBrightness);
       break;
-    case 4:
+    case lcdBrightnessSettingIndexIndex:
       currentLcdBrightness -= lcdBrightnessStep;
       if (currentLcdBrightness < minLcdBrightness) {
         currentLcdBrightness = minLcdBrightness;
       }
       setLcdBrightness();
       break;
-    case 5:
+    case soundsSettingIndex:
       currentSounds = !currentSounds;
       break;
-    case 6:
+    default:
       break;
   }
   changeMenuSubOption();
@@ -740,28 +775,18 @@ void decreaseSetting() {
 void changeMenuState() {
   if (currentState == menuState) {
     switch (currentMenuOption) {
-      case 1:
+      case startGameOptionIndex:
         startGame();
         break;
-      case 2:
-        break;
-      case 3:
-        currentMenuSubOption = 1;
+      case settingsOptionIndex:
+        currentMenuSubOption = difficultySettingIndex;
         currentState = subMenuState;
         changeMenuSubOption();
     }
   }
   if (currentState == subMenuState) {
     switch (currentMenuSubOption) {
-      case 1:
-        break;
-      case 2:
-        break;
-      case 3:
-        break;
-      case 4:
-        break;
-      case 6:
+      case backToMenuIndex:
         saveSettings();
         currentState = menuState;
         changeMenuOption();
@@ -817,7 +842,7 @@ void printGameStats() {
   lcd.clear();
   lcd.print("P: " + String(currentScore));
   lcd.setCursor(6, 0);
-  lcd.write((byte)0);
+  lcd.write((byte)heartCharIndex);
   lcd.print(": " + String(currentLives));
 }
 
@@ -886,18 +911,19 @@ void endGame() {
 
 void changeMenuOption() {
   if (currentSounds)
-    tone(BUZZER_PIN, 800, 50);
+    tone(BUZZER_PIN, moveMenuBuzzFreq, moveMenuBuzzTime);
+
   lcd.clear();
-  lcd.write((byte)3);
+  lcd.write((byte)verticalArrowsCharIndex);
 
   displayImage(menuImages[currentMenuOption - 1]);
 
   switch (currentMenuOption) {
-    case 1:
+    case startGameOptionIndex:
       Serial.println("changing state1111");
       lcd.print("Start game");
       break;
-    case 2:
+    case highScoreOptionIndex:
       lcd.print("Highscore: ");
       lcd.setCursor(0, 1);
       if (highScore != 0) {
@@ -909,15 +935,15 @@ void changeMenuOption() {
         lcd.print("No highscore yet!");
       }
       break;
-    case 3:
+    case settingsOptionIndex:
       lcd.print("Settings");
       break;
-    case 4:
+    case aboutOptionIndex:
       lcd.print("About <>");
       lcd.setCursor(0, 1);
       lcd.print(aboutText[aboutTextIndex]);
       break;
-    case 5:
+    case howToPlayOptionIndex:
       lcd.print("How to play <>");
       lcd.setCursor(0, 1);
       lcd.print(howToPlayText[howToPlayTextIndex]);
@@ -928,42 +954,42 @@ void changeMenuOption() {
   }
 }
 
-void changeMenuSubOption() {
-  if (currentSounds)
-    tone(BUZZER_PIN, 800, 50);
+void changeMenuSubOption(bool withoutSounds) {
+  if (currentSounds && !withoutSounds)
+    tone(BUZZER_PIN, moveMenuBuzzFreq, moveMenuBuzzTime);
   Serial.println("changing state");
   lcd.clear();
-  lcd.write((byte)3);
+  lcd.write((byte)verticalArrowsCharIndex);
 
   switch (currentMenuOption) {
-    case 3:
+    case settingsOptionIndex:
       switch (currentMenuSubOption) {
-        case 1:
+        case difficultySettingIndex:
           Serial.println("change menu suboption 2");
           lcd.print("Difficulty " + String(currentDifficulty) + " <>");
           break;
-        case 2:
+        case lcdContrastSettingIndex:
           lightDownMatrix();
           displayImage(menuImages[currentMenuOption - 1]);
           Serial.println("change menu suboption 3");
           lcd.print("Contrast " + String(currentLcdContrast) + "<>");
           break;
-        case 3:
+        case matrixBrightnessSettingIndex:
           lightUpMatrix();
           Serial.println("change menu suboption 3");
           lcd.print("Mat BRT " + String(currentMatrixBrightness) + " <>");
           break;
-        case 4:
+        case lcdBrightnessSettingIndexIndex:
           lightDownMatrix();
           displayImage(menuImages[currentMenuOption - 1]);
           Serial.println("change menu suboption 4");
           lcd.print("LCD BRT " + String(currentLcdBrightness) + " <>");
           break;
-        case 5:
+        case soundsSettingIndex:
           Serial.println("change menu suboption 5");
           lcd.print("Sounds " + String(currentSounds) + " <>");
           break;
-        case 6:
+        case backToMenuIndex:
           Serial.println("change menu suboption 6");
           lcd.print("Back to menu");
           break;
@@ -1055,7 +1081,7 @@ void playLevelUpSound() {
 
 void playDeathSound() {
   if (currentSounds)
-    tone(BUZZER_PIN, 100, 300);
+    tone(BUZZER_PIN, deathBuzzFreq, deathBuzzTime);
 }
 
 void displayImage(uint64_t image) {
