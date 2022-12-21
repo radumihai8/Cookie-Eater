@@ -36,3 +36,9 @@ Can you navigate through the snowy matrix and become the ultimate cookie eater? 
 - 1 Joystick
 - 1 Buzzer
 - Rezistors and wires
+- 
+## Video:
+https://youtu.be/YpQEDu3Fj8g
+
+## Image
+![Project image](https://imgur.com/rTPqBbR.png)
